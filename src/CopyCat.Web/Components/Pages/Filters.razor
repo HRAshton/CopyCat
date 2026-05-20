@@ -1,0 +1,377 @@
+@page "/filters"
+@inject IFilterManagementService FilterService
+@inject IChannelManagementService ChannelService
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Filters" Subtitle="Create, version, publish, and debug message filters."/>
+
+<MudGrid>
+    <MudItem xs="12" md="5">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Filter Editor</MudText>
+            <MudTextField @bind-Value="name" Label="Name" Required="true" Class="mt-2"/>
+            <MudTextField @bind-Value="description" Label="Description" Lines="2"/>
+            <MudSelect T="MappingDefaultPolicy" @bind-Value="defaultPolicy" Label="Default Policy">
+                <MudSelectItem T="MappingDefaultPolicy" Value="@MappingDefaultPolicy.Allow">Allow</MudSelectItem>
+                <MudSelectItem T="MappingDefaultPolicy" Value="@MappingDefaultPolicy.Reject">Reject</MudSelectItem>
+            </MudSelect>
+            <MudCheckBox @bind-Value="requireText" Label="Require text/caption"/>
+            <MudCheckBox @bind-Value="blockTelegramLinks" Label="Reject messages containing Telegram links"/>
+            <MudCheckBox @bind-Value="requireUrl" Label="Require any URL"/>
+            <MudCheckBox @bind-Value="editedOnly" Label="Only accept edited messages"/>
+            <MudTextField @bind-Value="regexPattern" Label="Regex Pattern"
+                          HelperText="Optional. Matches combined text/caption."/>
+            <MudTextField @bind-Value="whitelistWords" Label="Whitelist Words"
+                          HelperText="Comma-separated. At least one must match."/>
+            <MudTextField @bind-Value="blacklistWords" Label="Blacklist Words"
+                          HelperText="Comma-separated. Any match rejects the message."/>
+            <MudNumericField T="int?" @bind-Value="minimumLength" Label="Minimum Length"/>
+            <MudNumericField T="int?" @bind-Value="maximumLength" Label="Maximum Length"/>
+            <MudStack Row="true" Class="mt-3">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@SaveDraftAsync">Save Draft
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Disabled="@(!selectedFilterSetId.HasValue)"
+                           OnClick="@PublishAsync">Publish Latest
+                </MudButton>
+                <MudButton Variant="Variant.Text" OnClick="@ResetEditor">Clear</MudButton>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="7">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Saved Filters</MudText>
+            <MudTable T="FilterSetSummary" Items="filters" Dense="true" Hover="true" Class="mt-2">
+                <HeaderContent>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Versions</MudTh>
+                    <MudTh></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.Name</MudTd>
+                    <MudTd>@context.VersionCount</MudTd>
+                    <MudTd>
+                        <MudStack Row="true" Spacing="1">
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                       OnClick="@(() => LoadFilter(context))">Edit As New Draft
+                            </MudButton>
+                            <MudButton Size="Size.Small" OnClick="@(() => DebugFilterAsync(context.Id))">Debug
+                            </MudButton>
+                            <MudButton Size="Size.Small" Color="Color.Primary" Disabled="@(context.VersionCount == 0)"
+                                       OnClick="@(() => PublishAsync(context.Id))">Publish
+                            </MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                                       OnClick="@(() => DeleteFilterAsync(context.Id))">Delete
+                            </MudButton>
+                        </MudStack>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+
+        <MudPaper Class="pa-4 mt-4">
+            <MudText Typo="Typo.h6">Debug</MudText>
+            <MudStack Row="true" Class="mt-2">
+                <MudSelect T="Guid?" @bind-Value="debugChannelId" Label="Channel">
+                    <MudSelectItem T="Guid?" Value="@((Guid?)null)">All Channels</MudSelectItem>
+                    @foreach (var channel in channels.Where(x => x.IsSource))
+                    {
+                        <MudSelectItem T="Guid?" Value="@channel.Id">@channel.Title</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudNumericField T="int" @bind-Value="debugTake" Label="Messages" Min="1" Max="200"/>
+            </MudStack>
+
+            @if (debugResults.Count > 0)
+            {
+                <MudTable T="FilterDebugResult" Items="debugResults" Dense="true" Hover="true" Class="mt-3">
+                    <HeaderContent>
+                        <MudTh>Date</MudTh>
+                        <MudTh>Message</MudTh>
+                        <MudTh>Accepted</MudTh>
+                        <MudTh>Rule</MudTh>
+                        <MudTh>Trace</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.MessageDate</MudTd>
+                        <MudTd>@context.Preview</MudTd>
+                        <MudTd>@context.Accepted</MudTd>
+                        <MudTd>@context.MatchedRuleId</MudTd>
+                        <MudTd>@string.Join(" | ", context.Trace)</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+
+    private IReadOnlyList<FilterSetSummary> filters = [];
+
+    private IReadOnlyList<ChannelSummary> channels = [];
+
+    private List<FilterDebugResult> debugResults = [];
+
+    private Guid? selectedFilterSetId;
+
+    private Guid? debugChannelId;
+
+    private string name = string.Empty;
+
+    private string description = string.Empty;
+
+    private MappingDefaultPolicy defaultPolicy = MappingDefaultPolicy.Allow;
+
+    private bool requireText;
+
+    private bool blockTelegramLinks;
+
+    private bool requireUrl;
+
+    private bool editedOnly;
+
+    private string regexPattern = string.Empty;
+
+    private string whitelistWords = string.Empty;
+
+    private string blacklistWords = string.Empty;
+
+    private int? minimumLength;
+
+    private int? maximumLength;
+
+    private int debugTake = 50;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            filters = await FilterService.GetFilterSetsAsync();
+            channels = await ChannelService.GetChannelsAsync();
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                Snackbar.Add("Filter name is required.", Severity.Warning);
+                return;
+            }
+
+            await FilterService.SaveDraftAsync(
+                new FilterSetEditorModel(
+                    selectedFilterSetId,
+                    name.Trim(),
+                    string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
+                    BuildDefinition()));
+
+            await ReloadAsync();
+            Snackbar.Add("Filter draft saved.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task PublishAsync()
+    {
+        if (selectedFilterSetId.HasValue)
+        {
+            await PublishAsync(selectedFilterSetId.Value);
+        }
+    }
+
+    private async Task PublishAsync(Guid filterSetId)
+    {
+        try
+        {
+            await FilterService.PublishLatestAsync(filterSetId);
+            await ReloadAsync();
+            Snackbar.Add("Filter published.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task DeleteFilterAsync(Guid filterSetId)
+    {
+        try
+        {
+            await FilterService.DeleteFilterSetAsync(filterSetId);
+            await ReloadAsync();
+            if (selectedFilterSetId == filterSetId)
+            {
+                ResetEditor();
+            }
+
+            Snackbar.Add("Filter set deleted.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task DebugFilterAsync(Guid filterSetId)
+    {
+        try
+        {
+            selectedFilterSetId = filterSetId;
+            debugResults = (await FilterService.DebugAsync(filterSetId, debugChannelId, debugTake)).ToList();
+            Snackbar.Add("Filter debug results loaded.", Severity.Info);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private void LoadFilter(FilterSetSummary filterSet)
+    {
+        selectedFilterSetId = filterSet.Id;
+        name = filterSet.Name;
+        description = filterSet.Description ?? string.Empty;
+        if (filterSet.LatestDefinition is null)
+        {
+            ResetEditor();
+            selectedFilterSetId = filterSet.Id;
+            name = filterSet.Name;
+            description = filterSet.Description ?? string.Empty;
+            return;
+        }
+
+        ApplyDefinition(filterSet.LatestDefinition);
+    }
+
+    private void ResetEditor()
+    {
+        selectedFilterSetId = null;
+        name = string.Empty;
+        description = string.Empty;
+        defaultPolicy = MappingDefaultPolicy.Allow;
+        requireText = false;
+        blockTelegramLinks = false;
+        requireUrl = false;
+        editedOnly = false;
+        regexPattern = string.Empty;
+        whitelistWords = string.Empty;
+        blacklistWords = string.Empty;
+        minimumLength = null;
+        maximumLength = null;
+    }
+
+    private FilterSetDefinition BuildDefinition()
+    {
+        var children = new List<FilterNode>();
+
+        if (requireText)
+        {
+            children.Add(new HasTextCondition(true, "require_text"));
+        }
+
+        if (blockTelegramLinks)
+        {
+            children.Add(new HasTelegramLinkCondition(false, "block_telegram_links"));
+        }
+
+        if (requireUrl)
+        {
+            children.Add(new HasAnyUrlCondition(true, "require_any_url"));
+        }
+
+        if (editedOnly)
+        {
+            children.Add(new IsEditedCondition(true, "edited_only"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(regexPattern))
+        {
+            children.Add(new RegexCondition(regexPattern.Trim(), TextField.Combined, "regex"));
+        }
+
+        var whitelist = SplitWords(whitelistWords);
+        if (whitelist.Count > 0)
+        {
+            children.Add(new ContainsWordsCondition(whitelist, MatchMode.Any, false, true, "whitelist"));
+        }
+
+        var blacklist = SplitWords(blacklistWords);
+        if (blacklist.Count > 0)
+        {
+            children.Add(new ContainsWordsCondition(blacklist, MatchMode.Any, false, false, "blacklist"));
+        }
+
+        if (minimumLength.HasValue || maximumLength.HasValue)
+        {
+            children.Add(new LengthCondition(minimumLength, maximumLength, "length"));
+        }
+
+        var root = children.Count switch
+        {
+            0 => null,
+            1 => children[0],
+            _ => new ConditionGroup(LogicalOperator.And, children, "root")
+        };
+
+        return new FilterSetDefinition(name.Trim(), defaultPolicy, root);
+    }
+
+    private void ApplyDefinition(FilterSetDefinition definition)
+    {
+        var selectedFilterSetId = this.selectedFilterSetId;
+        string description = this.description;
+        ResetEditor();
+        this.selectedFilterSetId = selectedFilterSetId;
+        name = definition.Name;
+        this.description = description;
+        defaultPolicy = definition.DefaultPolicy;
+        var nodes = FlattenNodes(definition.Root).ToList();
+        requireText = nodes.OfType<HasTextCondition>().Any(x => x.Expected);
+        blockTelegramLinks = nodes.OfType<HasTelegramLinkCondition>().Any(x => !x.Expected);
+        requireUrl = nodes.OfType<HasAnyUrlCondition>().Any(x => x.Expected);
+        editedOnly = nodes.OfType<IsEditedCondition>().Any(x => x.Expected);
+        regexPattern = nodes.OfType<RegexCondition>().Select(x => x.Pattern).FirstOrDefault() ?? string.Empty;
+        whitelistWords = string.Join(", ", nodes.OfType<ContainsWordsCondition>().Where(x => x.IsWhitelist).SelectMany(x => x.Words).Distinct());
+        blacklistWords = string.Join(", ", nodes.OfType<ContainsWordsCondition>().Where(x => !x.IsWhitelist).SelectMany(x => x.Words).Distinct());
+        var length = nodes.OfType<LengthCondition>().FirstOrDefault();
+        minimumLength = length?.Minimum;
+        maximumLength = length?.Maximum;
+    }
+
+    private static IReadOnlyList<string> SplitWords(string value) =>
+        value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+    private static IEnumerable<FilterNode> FlattenNodes(FilterNode? node)
+    {
+        if (node is null)
+        {
+            yield break;
+        }
+
+        if (node is ConditionGroup group)
+        {
+            foreach (var child in group.Children.SelectMany(FlattenNodes))
+            {
+                yield return child;
+            }
+
+            yield break;
+        }
+
+        yield return node;
+    }
+
+}
+

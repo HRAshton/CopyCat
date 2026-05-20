@@ -1,0 +1,473 @@
+@page "/sessions"
+@implements IDisposable
+@inject ISessionManagementService SessionService
+@inject ISnackbar Snackbar
+
+@using QRCoder
+
+<PageTitle>Sessions</PageTitle>
+
+<PageHeader Title="Telegram Sessions"
+            Subtitle="Create a session, then follow only the next required Telegram login step."/>
+
+<MudGrid>
+    <MudItem xs="12" md="5">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Create Session</MudText>
+            <MudTextField @bind-Value="createModel.Name" Label="Display Name" Required="true" Class="mt-2"/>
+            <MudTextField @bind-Value="createModel.PhoneNumber" Label="Phone Number" Required="true"
+                          HelperText="Format: +1234567890"/>
+            <MudTextField @bind-Value="createModel.ApiId" Label="API ID" Required="true"/>
+            <MudTextField @bind-Value="createModel.ApiHash" Label="API Hash" Required="true"/>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3" OnClick="@CreateSessionAsync">Create
+                Session
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="7">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Login Wizard</MudText>
+
+            @if (SelectedSession is null)
+            {
+                <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">Select a session row below to continue.
+                </MudAlert>
+            }
+            else
+            {
+                <MudStack Spacing="1" Class="mt-2">
+                    <MudText><strong>Session:</strong> @SelectedSession.Name</MudText>
+                    <MudText><strong>Phone:</strong> @SelectedSession.PhoneNumberMasked</MudText>
+                    <MudText><strong>Status:</strong> @SelectedSession.Status</MudText>
+                    <MudText><strong>Pending Challenge:</strong> @(SelectedSession.PendingChallenge ?? "none")</MudText>
+                    @if (!string.IsNullOrWhiteSpace(SelectedSession.LastError))
+                    {
+                        <MudAlert Severity="Severity.Error" Dense="true">@SelectedSession.LastError</MudAlert>
+                    }
+                    else
+                    {
+                        <MudAlert Severity="Severity.Info" Dense="true">@StatusHelpText</MudAlert>
+                    }
+                </MudStack>
+
+                <MudTextField Value="@SelectedSession.Id.ToString()" Label="Session Id" ReadOnly="true" Class="mt-3"/>
+
+                @if (!string.IsNullOrWhiteSpace(SelectedSession.QrLoginUrl))
+                {
+                    <MudPaper Class="pa-3 mt-3">
+                        <MudText Typo="Typo.subtitle1">QR Login</MudText>
+                        <div class="mt-2">@((MarkupString)GetQrSvgMarkup(SelectedSession.QrLoginUrl))</div>
+                        <MudTextField Value="@SelectedSession.QrLoginUrl" Label="Telegram Login URL" ReadOnly="true"
+                                      Lines="2" Class="mt-2"/>
+                    </MudPaper>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(SelectedSession.AuthTrace))
+                {
+                    <MudTextField Value="@SelectedSession.AuthTrace" Label="Auth Trace" ReadOnly="true" Lines="8"
+                                  Class="mt-3"/>
+                }
+
+                @if (NeedsCode)
+                {
+                    <MudTextField @bind-Value="loginCode" Label="Verification Code"
+                                  HelperText="Enter the code Telegram sent to this account."/>
+                }
+
+                @if (NeedsPassword)
+                {
+                    <MudTextField @bind-Value="password" Label="2FA Password" InputType="InputType.Password"
+                                  HelperText="Enter the Telegram cloud password for this account."/>
+                }
+
+                <MudStack Row="true" Class="mt-3">
+                    <MudButton Disabled="@(!CanStartLogin)" OnClick="@(() => StartLoginAsync(SelectedSession.Id))">Start
+                        Login
+                    </MudButton>
+                    <MudButton Disabled="@(!CanStartQrLogin)" OnClick="@(() => StartQrLoginAsync(SelectedSession.Id))">
+                        Start QR Login
+                    </MudButton>
+                    <MudButton Disabled="@(!NeedsCode)" OnClick="@SubmitCodeAsync">Submit Code</MudButton>
+                    <MudButton Disabled="@(!NeedsCode)" OnClick="@ResendCodeAsync">Request New Code</MudButton>
+                    <MudButton Disabled="@(!NeedsPassword)" OnClick="@SubmitPasswordAsync">Submit Password</MudButton>
+                    <MudButton Disabled="@(!CanReconnect)" OnClick="@(() => ReconnectAsync(SelectedSession.Id))">Restart
+                        Login
+                    </MudButton>
+                </MudStack>
+            }
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+<MudTable T="SessionSummary" Items="sessions" Dense="true" Hover="true" Class="mt-4"
+          OnRowClick="@(args => OnSessionRowClick(args))">
+    <HeaderContent>
+        <MudTh>Id</MudTh>
+        <MudTh>Name</MudTh>
+        <MudTh>Phone</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh>Challenge</MudTh>
+        <MudTh>Connected</MudTh>
+        <MudTh>Error</MudTh>
+        <MudTh>Actions</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd DataLabel="Id"><code>@context.Id</code></MudTd>
+        <MudTd DataLabel="Name">@context.Name</MudTd>
+        <MudTd DataLabel="Phone">@context.PhoneNumberMasked</MudTd>
+        <MudTd DataLabel="Status">@context.Status</MudTd>
+        <MudTd DataLabel="Challenge">@context.PendingChallenge</MudTd>
+        <MudTd DataLabel="Connected">@context.LastConnectedAt</MudTd>
+        <MudTd DataLabel="Error">@context.LastError</MudTd>
+        <MudTd DataLabel="Actions">
+            <MudStack Row="true" Spacing="1">
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => SelectSession(context.Id))">
+                    Select
+                </MudButton>
+                <MudButton Size="Size.Small" Color="Color.Error" OnClick="@(() => DisableAsync(context.Id))">Disable
+                </MudButton>
+                <MudButton Size="Size.Small" Variant="Variant.Text"
+                           Color="Color.Error"
+                           OnClick="@(() => DeleteAsync(context.Id))">Delete
+                </MudButton>
+            </MudStack>
+        </MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+
+    private IReadOnlyList<SessionSummary> sessions = [];
+
+    private SessionCreateForm createModel = new();
+
+    private Guid? selectedSessionId;
+
+    private string loginCode = string.Empty;
+
+    private string password = string.Empty;
+
+    private Timer? refreshTimer;
+
+    private SessionSummary? SelectedSession => selectedSessionId.HasValue
+        ? sessions.FirstOrDefault(x => x.Id == selectedSessionId.Value)
+        : null;
+
+    private bool NeedsCode => SelectedSession?.Status == TelegramSessionStatus.AwaitingCode;
+
+    private bool NeedsPassword => SelectedSession?.Status == TelegramSessionStatus.AwaitingPassword;
+
+    private bool CanStartLogin => SelectedSession is not null
+                                  && SelectedSession.Status is not TelegramSessionStatus.Connected;
+
+    private bool CanStartQrLogin => CanStartLogin;
+
+    private bool CanReconnect => SelectedSession is not null
+                                 && SelectedSession.Status is not TelegramSessionStatus.Connected;
+
+    private string StatusHelpText => SelectedSession?.Status switch
+    {
+        TelegramSessionStatus.Pending => "Start the Telegram login flow.",
+        TelegramSessionStatus.AwaitingCode => $"Telegram is waiting for {SelectedSession?.PendingChallenge ?? "a verification code"}.",
+        TelegramSessionStatus.AwaitingPassword => $"Telegram accepted the previous step and is now waiting for {SelectedSession?.PendingChallenge ?? "the 2FA password"}.",
+        TelegramSessionStatus.Connected => "This session is connected and ready.",
+        TelegramSessionStatus.Disabled => "This session is disabled. Restart login to re-enable it.",
+        TelegramSessionStatus.Faulted => "The last login step failed. Review the error and restart login if needed.",
+        _ => "Select the next appropriate action."
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        refreshTimer = new Timer(async _ => await RefreshFromTimerAsync(), null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        sessions = await SessionService.GetSessionsAsync();
+        if (selectedSessionId.HasValue && sessions.All(x => x.Id != selectedSessionId.Value))
+        {
+            selectedSessionId = null;
+        }
+    }
+
+    private async Task CreateSessionAsync()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(createModel.Name) ||
+                string.IsNullOrWhiteSpace(createModel.PhoneNumber) ||
+                string.IsNullOrWhiteSpace(createModel.ApiId) ||
+                string.IsNullOrWhiteSpace(createModel.ApiHash))
+            {
+                Snackbar.Add("Fill in display name, phone number, API ID, and API hash.", Severity.Warning);
+                return;
+            }
+
+            var created = await SessionService.CreateSessionAsync(
+                new SessionCreateRequest(
+                    createModel.Name.Trim(),
+                    createModel.PhoneNumber.Trim(),
+                    createModel.ApiId.Trim(),
+                    createModel.ApiHash.Trim()));
+
+            createModel = new();
+            selectedSessionId = created.Id;
+            loginCode = string.Empty;
+            password = string.Empty;
+            await ReloadAsync();
+            Snackbar.Add("Session created. Select Start Login in the wizard.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private void SelectSession(Guid id)
+    {
+        selectedSessionId = id;
+        loginCode = string.Empty;
+        password = string.Empty;
+    }
+
+    private Task OnSessionRowClick(TableRowClickEventArgs<SessionSummary> args)
+    {
+        if (args.Item is not null)
+        {
+            SelectSession(args.Item.Id);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private async Task StartLoginAsync(Guid id)
+    {
+        try
+        {
+            SelectSession(id);
+            await SessionService.StartLoginAsync(id);
+            await ReloadAsync();
+            Snackbar.Add("Login step started. Check the session status for Telegram's exact next challenge.", Severity.Info);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task ReconnectAsync(Guid id)
+    {
+        try
+        {
+            SelectSession(id);
+            await SessionService.ReconnectSessionAsync(id);
+            await ReloadAsync();
+            Snackbar.Add("Login flow restarted.", Severity.Info);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task DisableAsync(Guid id)
+    {
+        try
+        {
+            await SessionService.DisableSessionAsync(id);
+            await ReloadAsync();
+            Snackbar.Add("Session disabled.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task DeleteAsync(Guid id)
+    {
+        try
+        {
+            await SessionService.DeleteSessionAsync(id);
+            await ReloadAsync();
+            if (selectedSessionId == id)
+            {
+                selectedSessionId = null;
+            }
+
+            Snackbar.Add("Session deleted.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task SubmitCodeAsync()
+    {
+        try
+        {
+            if (SelectedSession is null)
+            {
+                Snackbar.Add("Select a session first.", Severity.Warning);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(loginCode))
+            {
+                Snackbar.Add("Enter the verification code from Telegram.", Severity.Warning);
+                return;
+            }
+
+            await SessionService.SubmitCodeAsync(new LoginCodeRequest(SelectedSession.Id, loginCode.Trim()));
+            loginCode = string.Empty;
+            await ReloadAsync();
+
+            if (SelectedSession?.Status == TelegramSessionStatus.AwaitingPassword)
+            {
+                Snackbar.Add("Code accepted. Telegram now requires the 2FA password.", Severity.Info);
+            }
+            else if (SelectedSession?.Status == TelegramSessionStatus.Connected)
+            {
+                Snackbar.Add("Session connected.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("Verification code submitted.", Severity.Success);
+            }
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task SubmitPasswordAsync()
+    {
+        try
+        {
+            if (SelectedSession is null)
+            {
+                Snackbar.Add("Select a session first.", Severity.Warning);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(password))
+            {
+                Snackbar.Add("Enter the Telegram 2FA password.", Severity.Warning);
+                return;
+            }
+
+            await SessionService.SubmitPasswordAsync(new LoginPasswordRequest(SelectedSession.Id, password));
+            password = string.Empty;
+            await ReloadAsync();
+
+            if (SelectedSession?.Status == TelegramSessionStatus.Connected)
+            {
+                Snackbar.Add("Session connected.", Severity.Success);
+            }
+            else
+            {
+                Snackbar.Add("2FA password submitted.", Severity.Info);
+            }
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task StartQrLoginAsync(Guid id)
+    {
+        try
+        {
+            SelectSession(id);
+            await SessionService.StartQrLoginAsync(id);
+            await ReloadAsync();
+            Snackbar.Add("QR login started. Scan the code with Telegram -> Settings -> Devices -> Link Desktop Device.", Severity.Info);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task ResendCodeAsync()
+    {
+        try
+        {
+            if (SelectedSession is null)
+            {
+                Snackbar.Add("Select a session first.", Severity.Warning);
+                return;
+            }
+
+            await SessionService.ResendCodeAsync(SelectedSession.Id);
+            await ReloadAsync();
+            Snackbar.Add("Telegram login was restarted to request a fresh verification code.", Severity.Info);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task RefreshFromTimerAsync()
+    {
+        try
+        {
+            await InvokeAsync(async () =>
+            {
+                await ReloadAsync();
+                StateHasChanged();
+            });
+        }
+        catch
+        {
+        }
+    }
+
+    private static string GetQrSvgMarkup(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return string.Empty;
+        }
+
+        using QRCodeGenerator generator = new();
+        using var data = generator.CreateQrCode(url, QRCodeGenerator.ECCLevel.Q);
+        SvgQRCode svgQr = new(data);
+        return svgQr.GetGraphic(8);
+    }
+
+    public void Dispose()
+    {
+        refreshTimer?.Dispose();
+    }
+
+    private sealed class SessionCreateForm
+    {
+        /// <summary>
+        /// Gets or sets a value.
+        /// </summary>
+        public string Name { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets a value.
+        /// </summary>
+        public string PhoneNumber { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets a value.
+        /// </summary>
+        public string ApiId { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Gets or sets a value.
+        /// </summary>
+        public string ApiHash { get; set; } = string.Empty;
+    }
+
+}
+

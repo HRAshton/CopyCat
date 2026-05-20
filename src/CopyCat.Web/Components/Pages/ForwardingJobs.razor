@@ -1,0 +1,58 @@
+@page "/forwarding-jobs"
+@implements IAsyncDisposable
+@inject IForwardingJobService ForwardingJobService
+@inject Services.ForwardingJobUpdateNotifier JobUpdateNotifier
+
+<PageHeader Title="Forwarding Jobs" Subtitle="Live queue view, updated automatically when job state changes."/>
+
+<MudTable Items="jobs" Dense="true">
+    <HeaderContent>
+        <MudTh>Source</MudTh>
+        <MudTh>Target</MudTh>
+        <MudTh>Status</MudTh>
+        <MudTh>Mode</MudTh>
+        <MudTh>Attempts</MudTh>
+        <MudTh>Error</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.SourceChannelTitle</MudTd>
+        <MudTd>@context.TargetChannelTitle</MudTd>
+        <MudTd>@context.Status</MudTd>
+        <MudTd>@context.ForwardingMode</MudTd>
+        <MudTd>@context.Attempts</MudTd>
+        <MudTd>@context.LastError</MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+
+    private IReadOnlyList<ForwardingJobItem> jobs = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        JobUpdateNotifier.JobsChanged += HandleJobsChangedAsync;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        jobs = await ForwardingJobService.GetJobsAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task HandleJobsChangedAsync()
+    {
+        await InvokeAsync(ReloadAsync);
+    }
+
+    /// <summary>
+    /// Executes the operation.
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        JobUpdateNotifier.JobsChanged -= HandleJobsChangedAsync;
+        return ValueTask.CompletedTask;
+    }
+
+}
+

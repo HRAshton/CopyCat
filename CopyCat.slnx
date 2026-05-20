@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CopyCat.Application/CopyCat.Application.csproj"/>
+    <Project Path="src/CopyCat.Domain/CopyCat.Domain.csproj"/>
+    <Project Path="src/CopyCat.Infrastructure/CopyCat.Infrastructure.csproj"/>
+    <Project Path="src/CopyCat.Telegram/CopyCat.Telegram.csproj"/>
+    <Project Path="src/CopyCat.Web/CopyCat.Web.csproj"/>
+    <Project Path="src/CopyCat.Worker/CopyCat.Worker.csproj"/>
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CopyCat.Application.Tests/CopyCat.Application.Tests.csproj"/>
+    <Project Path="tests/CopyCat.Domain.Tests/CopyCat.Domain.Tests.csproj"/>
+    <Project Path="tests/CopyCat.Infrastructure.Tests/CopyCat.Infrastructure.Tests.csproj"/>
+    <Project Path="tests/CopyCat.Telegram.Tests/CopyCat.Telegram.Tests.csproj"/>
+  </Folder>
+</Solution>

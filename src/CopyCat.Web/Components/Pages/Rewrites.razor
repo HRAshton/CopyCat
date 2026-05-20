@@ -1,0 +1,354 @@
+@page "/rewrites"
+@inject IRewriteManagementService RewriteService
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Rewrites" Subtitle="Create, version, and publish message rewrite rules."/>
+
+<MudGrid>
+    <MudItem xs="12" md="5">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Rewrite Editor</MudText>
+            <MudTextField @bind-Value="name" Label="Name" Required="true" Class="mt-2"/>
+            <MudTextField @bind-Value="description" Label="Description" Lines="2"/>
+            <MudTextField @bind-Value="exactSearch" Label="Exact Search Text"/>
+            <MudTextField @bind-Value="exactReplacement" Label="Exact Replacement Text"/>
+            <MudTextField @bind-Value="regexPattern" Label="Regex Pattern"/>
+            <MudTextField @bind-Value="regexReplacement" Label="Regex Replacement"/>
+            <MudTextField @bind-Value="telegramLinkSearch" Label="Telegram Link Search"/>
+            <MudTextField @bind-Value="telegramLinkReplacement" Label="Telegram Link Replacement"/>
+            <MudTextField @bind-Value="prependHeader" Label="Header To Prepend"/>
+            <MudTextField @bind-Value="appendFooter" Label="Footer To Append"/>
+            <MudCheckBox @bind-Value="removeLinks" Label="Remove links"/>
+            <MudCheckBox @bind-Value="removeMentions" Label="Remove Telegram mentions"/>
+            <MudCheckBox @bind-Value="stripCaption" Label="Strip caption"/>
+            <MudCheckBox @bind-Value="stripAllText" Label="Strip all text"/>
+            <MudCheckBox @bind-Value="textOnlyOutput" Label="Text-only output"/>
+            <MudStack Row="true" Class="mt-3">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@SaveDraftAsync">Save Draft
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Disabled="@(!selectedRewriteSetId.HasValue)"
+                           OnClick="@PublishAsync">Publish Latest
+                </MudButton>
+                <MudButton Variant="Variant.Text" OnClick="@ResetEditor">Clear</MudButton>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="7">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Saved Rewrites</MudText>
+            <MudTable T="RewriteSetSummary" Items="rewrites" Dense="true" Hover="true" Class="mt-2">
+                <HeaderContent>
+                    <MudTh>Name</MudTh>
+                    <MudTh>Versions</MudTh>
+                    <MudTh></MudTh>
+                </HeaderContent>
+                <RowTemplate>
+                    <MudTd>@context.Name</MudTd>
+                    <MudTd>@context.VersionCount</MudTd>
+                    <MudTd>
+                        <MudStack Row="true" Spacing="1">
+                            <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                       OnClick="@(() => LoadRewrite(context))">Edit As New Draft
+                            </MudButton>
+                            <MudButton Size="Size.Small" Color="Color.Primary" Disabled="@(context.VersionCount == 0)"
+                                       OnClick="@(() => PublishAsync(context.Id))">Publish
+                            </MudButton>
+                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                                       OnClick="@(() => DeleteRewriteAsync(context.Id))">Delete
+                            </MudButton>
+                        </MudStack>
+                    </MudTd>
+                </RowTemplate>
+            </MudTable>
+        </MudPaper>
+
+        <MudPaper Class="pa-4 mt-4">
+            <MudText Typo="Typo.h6">Preview Of Configured Operations</MudText>
+            <MudList T="string" Dense="true" Class="mt-2">
+                @foreach (string preview in GetPreviewOperations())
+                {
+                    <MudListItem T="string">@preview</MudListItem>
+                }
+            </MudList>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+
+    private IReadOnlyList<RewriteSetSummary> rewrites = [];
+
+    private Guid? selectedRewriteSetId;
+
+    private string name = string.Empty;
+
+    private string description = string.Empty;
+
+    private string exactSearch = string.Empty;
+
+    private string exactReplacement = string.Empty;
+
+    private string regexPattern = string.Empty;
+
+    private string regexReplacement = string.Empty;
+
+    private string telegramLinkSearch = string.Empty;
+
+    private string telegramLinkReplacement = string.Empty;
+
+    private string prependHeader = string.Empty;
+
+    private string appendFooter = string.Empty;
+
+    private bool removeLinks;
+
+    private bool removeMentions;
+
+    private bool stripCaption;
+
+    private bool stripAllText;
+
+    private bool textOnlyOutput;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        try
+        {
+            rewrites = await RewriteService.GetRewriteSetsAsync();
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                Snackbar.Add("Rewrite name is required.", Severity.Warning);
+                return;
+            }
+
+            await RewriteService.SaveDraftAsync(
+                new RewriteSetEditorModel(
+                    selectedRewriteSetId,
+                    name.Trim(),
+                    string.IsNullOrWhiteSpace(description) ? null : description.Trim(),
+                    BuildRules()));
+
+            await ReloadAsync();
+            Snackbar.Add("Rewrite draft saved.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task PublishAsync()
+    {
+        if (selectedRewriteSetId.HasValue)
+        {
+            await PublishAsync(selectedRewriteSetId.Value);
+        }
+    }
+
+    private async Task PublishAsync(Guid rewriteSetId)
+    {
+        try
+        {
+            await RewriteService.PublishLatestAsync(rewriteSetId);
+            await ReloadAsync();
+            Snackbar.Add("Rewrite published.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task DeleteRewriteAsync(Guid rewriteSetId)
+    {
+        try
+        {
+            await RewriteService.DeleteRewriteSetAsync(rewriteSetId);
+            await ReloadAsync();
+            if (selectedRewriteSetId == rewriteSetId)
+            {
+                ResetEditor();
+            }
+
+            Snackbar.Add("Rewrite set deleted.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private void LoadRewrite(RewriteSetSummary rewriteSet)
+    {
+        selectedRewriteSetId = rewriteSet.Id;
+        name = rewriteSet.Name;
+        description = rewriteSet.Description ?? string.Empty;
+        ApplyRules(rewriteSet.LatestRules);
+    }
+
+    private void ResetEditor()
+    {
+        selectedRewriteSetId = null;
+        name = string.Empty;
+        description = string.Empty;
+        exactSearch = string.Empty;
+        exactReplacement = string.Empty;
+        regexPattern = string.Empty;
+        regexReplacement = string.Empty;
+        telegramLinkSearch = string.Empty;
+        telegramLinkReplacement = string.Empty;
+        prependHeader = string.Empty;
+        appendFooter = string.Empty;
+        removeLinks = false;
+        removeMentions = false;
+        stripCaption = false;
+        stripAllText = false;
+        textOnlyOutput = false;
+    }
+
+    private RewriteRuleSet BuildRules()
+    {
+        var operations = new List<RewriteOperation>();
+
+        if (!string.IsNullOrWhiteSpace(exactSearch))
+        {
+            operations.Add(new ReplaceExactTextOperation(exactSearch.Trim(), exactReplacement ?? string.Empty));
+        }
+
+        if (!string.IsNullOrWhiteSpace(regexPattern))
+        {
+            operations.Add(new RegexReplaceOperation(regexPattern.Trim(), regexReplacement ?? string.Empty));
+        }
+
+        if (removeLinks)
+        {
+            operations.Add(new RemoveLinksOperation());
+        }
+
+        if (removeMentions)
+        {
+            operations.Add(new RemoveTelegramMentionsOperation());
+        }
+
+        if (!string.IsNullOrWhiteSpace(telegramLinkSearch))
+        {
+            operations.Add(new ReplaceTelegramChannelLinksOperation(telegramLinkSearch.Trim(), telegramLinkReplacement ?? string.Empty));
+        }
+
+        if (!string.IsNullOrWhiteSpace(prependHeader))
+        {
+            operations.Add(new PrependHeaderOperation(prependHeader.Trim()));
+        }
+
+        if (!string.IsNullOrWhiteSpace(appendFooter))
+        {
+            operations.Add(new AppendFooterOperation(appendFooter.Trim()));
+        }
+
+        if (stripCaption)
+        {
+            operations.Add(new StripCaptionOperation());
+        }
+
+        if (stripAllText)
+        {
+            operations.Add(new StripAllTextOperation());
+        }
+
+        if (textOnlyOutput)
+        {
+            operations.Add(new TextOnlyOutputOperation());
+        }
+
+        return new RewriteRuleSet(operations);
+    }
+
+    private void ApplyRules(RewriteRuleSet? rules)
+    {
+        var selectedRewriteSetId = this.selectedRewriteSetId;
+        string name = this.name;
+        string description = this.description;
+        ResetEditor();
+        this.selectedRewriteSetId = selectedRewriteSetId;
+        this.name = name;
+        this.description = description;
+        if (rules is null)
+        {
+            return;
+        }
+
+        foreach (var operation in rules.EffectiveOperations)
+        {
+            switch (operation)
+            {
+                case ReplaceExactTextOperation exact:
+                    exactSearch = exact.Search;
+                    exactReplacement = exact.Replacement;
+                    break;
+                case RegexReplaceOperation regex:
+                    regexPattern = regex.Pattern;
+                    regexReplacement = regex.Replacement;
+                    break;
+                case RemoveLinksOperation:
+                    removeLinks = true;
+                    break;
+                case RemoveTelegramMentionsOperation:
+                    removeMentions = true;
+                    break;
+                case ReplaceTelegramChannelLinksOperation replaceLinks:
+                    telegramLinkSearch = replaceLinks.Search;
+                    telegramLinkReplacement = replaceLinks.Replacement;
+                    break;
+                case PrependHeaderOperation header:
+                    prependHeader = header.Text;
+                    break;
+                case AppendFooterOperation footer:
+                    appendFooter = footer.Text;
+                    break;
+                case StripCaptionOperation:
+                    stripCaption = true;
+                    break;
+                case StripAllTextOperation:
+                    stripAllText = true;
+                    break;
+                case TextOnlyOutputOperation:
+                    textOnlyOutput = true;
+                    break;
+            }
+        }
+    }
+
+    private IReadOnlyList<string> GetPreviewOperations()
+    {
+        var rules = BuildRules();
+        return rules.EffectiveOperations.Select(operation => operation switch
+        {
+            ReplaceExactTextOperation exact => $"Replace exact '{exact.Search}' with '{exact.Replacement}'",
+            RegexReplaceOperation regex => $"Regex replace '{regex.Pattern}' with '{regex.Replacement}'",
+            RemoveLinksOperation => "Remove links",
+            RemoveTelegramMentionsOperation => "Remove Telegram mentions",
+            ReplaceTelegramChannelLinksOperation replaceLinks => $"Replace Telegram links '{replaceLinks.Search}' -> '{replaceLinks.Replacement}'",
+            PrependHeaderOperation header => $"Prepend header '{header.Text}'",
+            AppendFooterOperation footer => $"Append footer '{footer.Text}'",
+            StripCaptionOperation => "Strip caption",
+            StripAllTextOperation => "Strip all text",
+            TextOnlyOutputOperation => "Text-only output",
+            _ => operation.GetType().Name
+        }).ToArray();
+    }
+
+}
+

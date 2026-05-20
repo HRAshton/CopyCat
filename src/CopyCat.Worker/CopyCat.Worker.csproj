@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <UserSecretsId>dotnet-CopyCat.Worker-78f95671-7329-46b8-9c62-e8ba247c99b5</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting"/>
+    <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CopyCat.Application\CopyCat.Application.csproj"/>
+    <ProjectReference Include="..\CopyCat.Infrastructure\CopyCat.Infrastructure.csproj"/>
+    <ProjectReference Include="..\CopyCat.Telegram\CopyCat.Telegram.csproj"/>
+  </ItemGroup>
+</Project>

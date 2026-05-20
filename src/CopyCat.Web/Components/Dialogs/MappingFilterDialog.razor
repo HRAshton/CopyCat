@@ -1,0 +1,253 @@
+@inject IMappingManagementService MappingService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6">Filter: @MappingLabel</MudText>
+            <MudCheckBox @bind-Value="isEnabled" Label="Enable filter for this mapping"/>
+            <MudSelect T="MappingDefaultPolicy" @bind-Value="defaultPolicy" Label="Default Policy"
+                       Disabled="@(!isEnabled)">
+                <MudSelectItem T="MappingDefaultPolicy" Value="@MappingDefaultPolicy.Allow">Allow</MudSelectItem>
+                <MudSelectItem T="MappingDefaultPolicy" Value="@MappingDefaultPolicy.Reject">Reject</MudSelectItem>
+            </MudSelect>
+            <MudCheckBox @bind-Value="requireText" Label="Require text/caption" Disabled="@(!isEnabled)"/>
+            <MudCheckBox @bind-Value="blockTelegramLinks" Label="Reject messages containing Telegram links"
+                         Disabled="@(!isEnabled)"/>
+            <MudCheckBox @bind-Value="requireUrl" Label="Require any URL" Disabled="@(!isEnabled)"/>
+            <MudCheckBox @bind-Value="editedOnly" Label="Only accept edited messages" Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="regexPattern" Label="Regex Pattern"
+                          HelperText="Optional. Matches combined text/caption." Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="whitelistWords" Label="Whitelist Words"
+                          HelperText="Comma-separated. At least one must match." Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="blacklistWords" Label="Blacklist Words"
+                          HelperText="Comma-separated. Any match rejects the message." Disabled="@(!isEnabled)"/>
+            <MudNumericField T="int?" @bind-Value="minimumLength" Label="Minimum Length" Disabled="@(!isEnabled)"/>
+            <MudNumericField T="int?" @bind-Value="maximumLength" Label="Maximum Length" Disabled="@(!isEnabled)"/>
+
+            <MudDivider/>
+
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                <MudNumericField T="int" @bind-Value="debugTake" Label="Debug Messages" Min="1" Max="200"
+                                 Style="max-width: 180px;"/>
+                <MudButton Variant="Variant.Outlined" OnClick="@DebugAsync" Disabled="@(!isEnabled)">Debug Current
+                    Draft
+                </MudButton>
+            </MudStack>
+
+            @if (debugResults.Count > 0)
+            {
+                <MudTable T="FilterDebugResult" Items="debugResults" Dense="true" Hover="true">
+                    <HeaderContent>
+                        <MudTh>Date</MudTh>
+                        <MudTh>Message</MudTh>
+                        <MudTh>Accepted</MudTh>
+                        <MudTh>Rule</MudTh>
+                        <MudTh>Trace</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.MessageDate</MudTd>
+                        <MudTd>@context.Preview</MudTd>
+                        <MudTd>@context.Accepted</MudTd>
+                        <MudTd>@(context.MatchedRuleId ?? "-")</MudTd>
+                        <MudTd>@string.Join(" | ", context.Trace)</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="@Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="@RemoveAsync" Disabled="@(!hasExistingFilter)">
+            Remove
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public Guid MappingId { get; set; }
+
+    [Parameter]
+    public string MappingLabel { get; set; } = string.Empty;
+
+    private readonly List<FilterDebugResult> debugResults = [];
+
+    private bool hasExistingFilter;
+
+    private bool isEnabled;
+
+    private bool requireText;
+
+    private bool blockTelegramLinks;
+
+    private bool requireUrl;
+
+    private bool editedOnly;
+
+    private string regexPattern = string.Empty;
+
+    private string whitelistWords = string.Empty;
+
+    private string blacklistWords = string.Empty;
+
+    private int? minimumLength;
+
+    private int? maximumLength;
+
+    private int debugTake = 50;
+
+    private MappingDefaultPolicy defaultPolicy = MappingDefaultPolicy.Allow;
+
+    protected override async Task OnInitializedAsync()
+    {
+        MappingFilterEditorModel model = await MappingService.GetMappingFilterEditorAsync(MappingId);
+        isEnabled = model.IsEnabled;
+        hasExistingFilter = model.IsEnabled;
+        ApplyDefinition(model.Definition, model.DefaultPolicy);
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            await MappingService.SaveMappingFilterAsync(MappingId, new MappingFilterEditorModel(isEnabled, defaultPolicy, BuildDefinition()));
+            Snackbar.Add("Mapping filter saved.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task RemoveAsync()
+    {
+        try
+        {
+            await MappingService.RemoveMappingFilterAsync(MappingId);
+            Snackbar.Add("Mapping filter removed.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task DebugAsync()
+    {
+        try
+        {
+            debugResults.Clear();
+            debugResults.AddRange(await MappingService.DebugMappingFilterAsync(MappingId, BuildDefinition() with { DefaultPolicy = defaultPolicy }, debugTake));
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private FilterSetDefinition BuildDefinition()
+    {
+        List<FilterNode> children = [];
+
+        if (requireText)
+        {
+            children.Add(new HasTextCondition(true, "require_text"));
+        }
+
+        if (blockTelegramLinks)
+        {
+            children.Add(new HasTelegramLinkCondition(false, "block_telegram_links"));
+        }
+
+        if (requireUrl)
+        {
+            children.Add(new HasAnyUrlCondition(true, "require_any_url"));
+        }
+
+        if (editedOnly)
+        {
+            children.Add(new IsEditedCondition(true, "edited_only"));
+        }
+
+        if (!string.IsNullOrWhiteSpace(regexPattern))
+        {
+            children.Add(new RegexCondition(regexPattern.Trim(), TextField.Combined, "regex"));
+        }
+
+        IReadOnlyList<string> whitelist = SplitWords(whitelistWords);
+        if (whitelist.Count > 0)
+        {
+            children.Add(new ContainsWordsCondition(whitelist, MatchMode.Any, false, true, "whitelist"));
+        }
+
+        IReadOnlyList<string> blacklist = SplitWords(blacklistWords);
+        if (blacklist.Count > 0)
+        {
+            children.Add(new ContainsWordsCondition(blacklist, MatchMode.Any, false, false, "blacklist"));
+        }
+
+        if (minimumLength.HasValue || maximumLength.HasValue)
+        {
+            children.Add(new LengthCondition(minimumLength, maximumLength, "length"));
+        }
+
+        FilterNode? root = children.Count switch
+        {
+            0 => null,
+            1 => children[0],
+            _ => new ConditionGroup(LogicalOperator.And, children, "root")
+        };
+
+        return new FilterSetDefinition("Inline mapping filter", defaultPolicy, root);
+    }
+
+    private void ApplyDefinition(FilterSetDefinition definition, MappingDefaultPolicy defaultPolicy)
+    {
+        this.defaultPolicy = defaultPolicy;
+        IEnumerable<FilterNode> nodes = FlattenNodes(definition.Root).ToList();
+        requireText = nodes.OfType<HasTextCondition>().Any(x => x.Expected);
+        blockTelegramLinks = nodes.OfType<HasTelegramLinkCondition>().Any(x => !x.Expected);
+        requireUrl = nodes.OfType<HasAnyUrlCondition>().Any(x => x.Expected);
+        editedOnly = nodes.OfType<IsEditedCondition>().Any(x => x.Expected);
+        regexPattern = nodes.OfType<RegexCondition>().Select(x => x.Pattern).FirstOrDefault() ?? string.Empty;
+        whitelistWords = string.Join(", ", nodes.OfType<ContainsWordsCondition>().Where(x => x.IsWhitelist).SelectMany(x => x.Words).Distinct());
+        blacklistWords = string.Join(", ", nodes.OfType<ContainsWordsCondition>().Where(x => !x.IsWhitelist).SelectMany(x => x.Words).Distinct());
+        LengthCondition? length = nodes.OfType<LengthCondition>().FirstOrDefault();
+        minimumLength = length?.Minimum;
+        maximumLength = length?.Maximum;
+    }
+
+    private static IReadOnlyList<string> SplitWords(string value) =>
+        value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+    private static IEnumerable<FilterNode> FlattenNodes(FilterNode? node)
+    {
+        if (node is null)
+        {
+            yield break;
+        }
+
+        if (node is ConditionGroup group)
+        {
+            foreach (FilterNode child in group.Children.SelectMany(FlattenNodes))
+            {
+                yield return child;
+            }
+
+            yield break;
+        }
+
+        yield return node;
+    }
+
+}

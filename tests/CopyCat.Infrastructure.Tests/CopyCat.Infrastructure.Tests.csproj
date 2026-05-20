@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" PrivateAssets="all"/>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory"/>
+    <PackageReference Include="Microsoft.NET.Test.Sdk"/>
+    <PackageReference Include="xunit"/>
+    <PackageReference Include="xunit.analyzers" PrivateAssets="all"/>
+    <PackageReference Include="xunit.runner.visualstudio"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CopyCat.Application\CopyCat.Application.csproj"/>
+    <ProjectReference Include="..\..\src\CopyCat.Domain\CopyCat.Domain.csproj"/>
+    <ProjectReference Include="..\..\src\CopyCat.Infrastructure\CopyCat.Infrastructure.csproj"/>
+  </ItemGroup>
+
+</Project>

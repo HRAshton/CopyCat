@@ -1,0 +1,28 @@
+@page "/audit-log"
+@inject IAuditLogService AuditLogService
+
+<PageHeader Title="Audit Log" Subtitle="Administrative actions written by the application."/>
+
+<MudTable Items="items" Dense="true">
+    <HeaderContent>
+        <MudTh>When</MudTh>
+        <MudTh>Action</MudTh>
+        <MudTh>Entity</MudTh>
+        <MudTh>Id</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.CreatedAt</MudTd>
+        <MudTd>@context.Action</MudTd>
+        <MudTd>@context.EntityType</MudTd>
+        <MudTd>@context.EntityId</MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+
+    private IReadOnlyList<AuditLogItem> items = [];
+
+    protected override async Task OnInitializedAsync() => items = await AuditLogService.GetRecentAsync();
+
+}
+

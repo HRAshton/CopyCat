@@ -1,0 +1,265 @@
+@inject IMappingManagementService MappingService
+@inject ISnackbar Snackbar
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudText Typo="Typo.h6">Rewrite: @MappingLabel</MudText>
+            <MudCheckBox @bind-Value="isEnabled" Label="Enable rewrite for this mapping"/>
+            <MudTextField @bind-Value="exactSearch" Label="Exact Search Text" Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="exactReplacement" Label="Exact Replacement Text" Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="regexPattern" Label="Regex Pattern" Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="regexReplacement" Label="Regex Replacement" Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="telegramLinkSearch" Label="Telegram Link Search" Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="telegramLinkReplacement" Label="Telegram Link Replacement"
+                          Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="prependHeader" Label="Header To Prepend" Disabled="@(!isEnabled)"/>
+            <MudTextField @bind-Value="appendFooter" Label="Footer To Append" Disabled="@(!isEnabled)"/>
+            <MudCheckBox @bind-Value="removeLinks" Label="Remove links" Disabled="@(!isEnabled)"/>
+            <MudCheckBox @bind-Value="removeMentions" Label="Remove Telegram mentions" Disabled="@(!isEnabled)"/>
+            <MudCheckBox @bind-Value="stripCaption" Label="Strip caption" Disabled="@(!isEnabled)"/>
+            <MudCheckBox @bind-Value="stripAllText" Label="Strip all text" Disabled="@(!isEnabled)"/>
+            <MudCheckBox @bind-Value="textOnlyOutput" Label="Text-only output" Disabled="@(!isEnabled)"/>
+
+            <MudDivider/>
+
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                <MudNumericField T="int" @bind-Value="debugTake" Label="Debug Messages" Min="1" Max="200"
+                                 Style="max-width: 180px;"/>
+                <MudButton Variant="Variant.Outlined" OnClick="@DebugAsync" Disabled="@(!isEnabled)">Debug Current
+                    Draft
+                </MudButton>
+            </MudStack>
+
+            @if (debugResults.Count > 0)
+            {
+                <MudTable T="RewriteDebugResult" Items="debugResults" Dense="true" Hover="true">
+                    <HeaderContent>
+                        <MudTh>Date</MudTh>
+                        <MudTh>Original</MudTh>
+                        <MudTh>Text</MudTh>
+                        <MudTh>Caption</MudTh>
+                        <MudTh>Drop Media</MudTh>
+                    </HeaderContent>
+                    <RowTemplate>
+                        <MudTd>@context.MessageDate</MudTd>
+                        <MudTd>@context.Preview</MudTd>
+                        <MudTd>@(context.RewrittenText ?? "-")</MudTd>
+                        <MudTd>@(context.RewrittenCaption ?? "-")</MudTd>
+                        <MudTd>@context.DropMedia</MudTd>
+                    </RowTemplate>
+                </MudTable>
+            }
+        </MudStack>
+    </DialogContent>
+    <DialogActions>
+        <MudButton Variant="Variant.Text" OnClick="@Cancel">Cancel</MudButton>
+        <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="@RemoveAsync" Disabled="@(!hasExistingRewrite)">
+            Remove
+        </MudButton>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@SaveAsync">Save</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+
+    [CascadingParameter]
+    private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter]
+    public Guid MappingId { get; set; }
+
+    [Parameter]
+    public string MappingLabel { get; set; } = string.Empty;
+
+    private readonly List<RewriteDebugResult> debugResults = [];
+
+    private bool hasExistingRewrite;
+
+    private bool isEnabled;
+
+    private string exactSearch = string.Empty;
+
+    private string exactReplacement = string.Empty;
+
+    private string regexPattern = string.Empty;
+
+    private string regexReplacement = string.Empty;
+
+    private string telegramLinkSearch = string.Empty;
+
+    private string telegramLinkReplacement = string.Empty;
+
+    private string prependHeader = string.Empty;
+
+    private string appendFooter = string.Empty;
+
+    private bool removeLinks;
+
+    private bool removeMentions;
+
+    private bool stripCaption;
+
+    private bool stripAllText;
+
+    private bool textOnlyOutput;
+
+    private int debugTake = 50;
+
+    protected override async Task OnInitializedAsync()
+    {
+        MappingRewriteEditorModel model = await MappingService.GetMappingRewriteEditorAsync(MappingId);
+        isEnabled = model.IsEnabled;
+        hasExistingRewrite = model.IsEnabled;
+        ApplyRules(model.Rules);
+    }
+
+    private async Task SaveAsync()
+    {
+        try
+        {
+            await MappingService.SaveMappingRewriteAsync(MappingId, new MappingRewriteEditorModel(isEnabled, BuildRules()));
+            Snackbar.Add("Mapping rewrite saved.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task RemoveAsync()
+    {
+        try
+        {
+            await MappingService.RemoveMappingRewriteAsync(MappingId);
+            Snackbar.Add("Mapping rewrite removed.", Severity.Success);
+            MudDialog.Close(DialogResult.Ok(true));
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task DebugAsync()
+    {
+        try
+        {
+            debugResults.Clear();
+            debugResults.AddRange(await MappingService.DebugMappingRewriteAsync(MappingId, BuildRules(), debugTake));
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private RewriteRuleSet BuildRules()
+    {
+        List<RewriteOperation> operations = [];
+
+        if (!string.IsNullOrWhiteSpace(exactSearch))
+        {
+            operations.Add(new ReplaceExactTextOperation(exactSearch.Trim(), exactReplacement ?? string.Empty));
+        }
+
+        if (!string.IsNullOrWhiteSpace(regexPattern))
+        {
+            operations.Add(new RegexReplaceOperation(regexPattern.Trim(), regexReplacement ?? string.Empty));
+        }
+
+        if (removeLinks)
+        {
+            operations.Add(new RemoveLinksOperation());
+        }
+
+        if (removeMentions)
+        {
+            operations.Add(new RemoveTelegramMentionsOperation());
+        }
+
+        if (!string.IsNullOrWhiteSpace(telegramLinkSearch))
+        {
+            operations.Add(new ReplaceTelegramChannelLinksOperation(telegramLinkSearch.Trim(), telegramLinkReplacement ?? string.Empty));
+        }
+
+        if (!string.IsNullOrWhiteSpace(prependHeader))
+        {
+            operations.Add(new PrependHeaderOperation(prependHeader.Trim()));
+        }
+
+        if (!string.IsNullOrWhiteSpace(appendFooter))
+        {
+            operations.Add(new AppendFooterOperation(appendFooter.Trim()));
+        }
+
+        if (stripCaption)
+        {
+            operations.Add(new StripCaptionOperation());
+        }
+
+        if (stripAllText)
+        {
+            operations.Add(new StripAllTextOperation());
+        }
+
+        if (textOnlyOutput)
+        {
+            operations.Add(new TextOnlyOutputOperation());
+        }
+
+        return new RewriteRuleSet(operations);
+    }
+
+    private void ApplyRules(RewriteRuleSet? rules)
+    {
+        if (rules is null)
+        {
+            return;
+        }
+
+        foreach (RewriteOperation operation in rules.EffectiveOperations)
+        {
+            switch (operation)
+            {
+                case ReplaceExactTextOperation exact:
+                    exactSearch = exact.Search;
+                    exactReplacement = exact.Replacement;
+                    break;
+                case RegexReplaceOperation regex:
+                    regexPattern = regex.Pattern;
+                    regexReplacement = regex.Replacement;
+                    break;
+                case RemoveLinksOperation:
+                    removeLinks = true;
+                    break;
+                case RemoveTelegramMentionsOperation:
+                    removeMentions = true;
+                    break;
+                case ReplaceTelegramChannelLinksOperation replaceLinks:
+                    telegramLinkSearch = replaceLinks.Search;
+                    telegramLinkReplacement = replaceLinks.Replacement;
+                    break;
+                case PrependHeaderOperation header:
+                    prependHeader = header.Text;
+                    break;
+                case AppendFooterOperation footer:
+                    appendFooter = footer.Text;
+                    break;
+                case StripCaptionOperation:
+                    stripCaption = true;
+                    break;
+                case StripAllTextOperation:
+                    stripAllText = true;
+                    break;
+                case TextOnlyOutputOperation:
+                    textOnlyOutput = true;
+                    break;
+            }
+        }
+    }
+
+}

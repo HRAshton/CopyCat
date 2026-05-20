@@ -1,0 +1,73 @@
+@page "/"
+@inject IDashboardService DashboardService
+
+<PageTitle>Dashboard</PageTitle>
+
+<PageHeader Title="Dashboard" Subtitle="Operational view over sessions, channels, mappings, and queue health."/>
+
+@if (snapshot is null)
+{
+    <MudProgressCircular Indeterminate="true"/>
+}
+else
+{
+    <MudGrid>
+        <MudItem xs="12" sm="6" md="2">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.caption">Enabled Sessions</MudText>
+                <MudText Typo="Typo.h4">@snapshot.EnabledSessions</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="2">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.caption">Unhealthy</MudText>
+                <MudText Typo="Typo.h4">@snapshot.UnhealthySessions</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="2">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.caption">Sources</MudText>
+                <MudText Typo="Typo.h4">@snapshot.ActiveSourceChannels</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="2">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.caption">Mappings</MudText>
+                <MudText Typo="Typo.h4">@snapshot.ActiveMappings</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="2">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.caption">Pending Jobs</MudText>
+                <MudText Typo="Typo.h4">@snapshot.PendingJobs</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="6" md="2">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.caption">Failed Jobs</MudText>
+                <MudText Typo="Typo.h4">@snapshot.FailedJobs</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12">
+            <MudPaper Class="pa-4">
+                <MudText Typo="Typo.h6">Latest Errors</MudText>
+                @foreach (string error in snapshot.LatestErrors)
+                {
+                    <MudAlert Severity="Severity.Warning" Dense="true" Class="mt-2">@error</MudAlert>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+
+    private DashboardSnapshot? snapshot;
+
+    protected override async Task OnInitializedAsync()
+    {
+        snapshot = await DashboardService.GetSnapshotAsync();
+    }
+
+}
+

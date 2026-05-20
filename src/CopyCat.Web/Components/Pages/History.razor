@@ -1,0 +1,62 @@
+@page "/history"
+@implements IAsyncDisposable
+@inject IMessageHistoryService HistoryService
+
+<PageHeader Title="History" Subtitle="Stored messages, refreshed automatically, newest first."/>
+
+<MudTable Items="items" Dense="true">
+    <HeaderContent>
+        <MudTh>Date</MudTh>
+        <MudTh>Source</MudTh>
+        <MudTh>Message</MudTh>
+        <MudTh>Attachments</MudTh>
+        <MudTh>Decision</MudTh>
+    </HeaderContent>
+    <RowTemplate>
+        <MudTd>@context.MessageDate</MudTd>
+        <MudTd>@context.SourceChannelTitle</MudTd>
+        <MudTd>@context.Preview</MudTd>
+        <MudTd>@context.AttachmentSummary</MudTd>
+        <MudTd>@context.Decision</MudTd>
+    </RowTemplate>
+</MudTable>
+
+@code {
+
+    private readonly CancellationTokenSource refreshCts = new();
+
+    private IReadOnlyList<MessageHistoryItem> items = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+        _ = RefreshLoopAsync(refreshCts.Token);
+    }
+
+    private async Task ReloadAsync()
+    {
+        items = await HistoryService.GetRecentMessagesAsync(null, 100, refreshCts.Token);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshLoopAsync(CancellationToken cancellationToken)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            await ReloadAsync();
+        }
+    }
+
+    /// <summary>
+    /// Executes the operation.
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        refreshCts.Cancel();
+        refreshCts.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+}
+

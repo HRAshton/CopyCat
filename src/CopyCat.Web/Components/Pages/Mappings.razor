@@ -1,0 +1,329 @@
+@page "/mappings"
+@inject IMappingManagementService MappingService
+@inject IChannelManagementService ChannelService
+@inject IDialogService DialogService
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Mappings"
+            Subtitle="Create routes, edit mapping-owned filters and rewrites in popups, and run one-shot backfills only when you need them."/>
+
+<MudGrid>
+    <MudItem xs="12" md="5">
+        <MudPaper Class="pa-4">
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.h6">@(editingMappingId.HasValue ? "Edit Mapping" : "Create Mapping")</MudText>
+
+                <MudSelect T="Guid?" @bind-Value="sourceChannelId" Label="Source Channel">
+                    @foreach (var source in channels.Where(x => x.IsSource).OrderBy(x => x.Title))
+                    {
+                        <MudSelectItem T="Guid?" Value="@source.Id">@source.Title</MudSelectItem>
+                    }
+                </MudSelect>
+
+                <MudSelect T="Guid?" @bind-Value="targetChannelId" Label="Target Channel">
+                    @foreach (var target in channels.Where(x => x.IsTarget).OrderBy(x => x.Title))
+                    {
+                        <MudSelectItem T="Guid?" Value="@target.Id">@target.Title</MudSelectItem>
+                    }
+                </MudSelect>
+
+                <MudSelect T="ForwardingMode" @bind-Value="forwardingMode" Label="Forwarding Mode">
+                    @foreach (var mode in Enum.GetValues<ForwardingMode>())
+                    {
+                        <MudSelectItem T="ForwardingMode" Value="@mode">@mode</MudSelectItem>
+                    }
+                </MudSelect>
+
+                <MudCheckBox @bind-Value="isEnabled" Label="Enabled"/>
+                <MudCheckBox @bind-Value="liveForwardingEnabled" Label="Live Forwarding Enabled"/>
+
+                <MudStack Row="true" Spacing="2">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@SaveMappingAsync">Save Mapping
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Secondary"
+                               Disabled="@(!editingMappingId.HasValue)" OnClick="@ResetEditor">Clear
+                    </MudButton>
+                </MudStack>
+
+                <MudStack Row="true" Spacing="2">
+                    <MudButton Variant="Variant.Outlined" Disabled="@(!editingMappingId.HasValue)"
+                               OnClick="@OpenSelectedFilterDialogAsync">Edit Filter
+                    </MudButton>
+                    <MudButton Variant="Variant.Outlined" Disabled="@(!editingMappingId.HasValue)"
+                               OnClick="@OpenSelectedRewriteDialogAsync">Edit Rewrite
+                    </MudButton>
+                </MudStack>
+
+                <MudAlert Severity="Severity.Info" Dense="true" Variant="Variant.Outlined">
+                    Each mapping owns its own filter and rewrite configuration. Save a new mapping first, then edit its
+                    rules from the buttons above or from the table.
+                </MudAlert>
+            </MudStack>
+        </MudPaper>
+
+        <MudPaper Class="pa-4 mt-4">
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.h6">One-Time Backfill</MudText>
+                <MudSelect T="Guid?" @bind-Value="backfillMappingId" Label="Mapping">
+                    @foreach (var mapping in mappings.OrderBy(x => x.SourceChannelTitle).ThenBy(x => x.TargetChannelTitle))
+                    {
+                        <MudSelectItem T="Guid?"
+                                       Value="@mapping.Id">@($"{mapping.SourceChannelTitle} -> {mapping.TargetChannelTitle}")</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudNumericField T="int" @bind-Value="backfillTake" Label="Messages To Import" Min="1"/>
+                <MudButton Variant="Variant.Outlined" Color="Color.Secondary" OnClick="@RunBackfillAsync">Run Backfill
+                </MudButton>
+                <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Outlined">
+                    Backfill is not a stored mapping setting anymore. It imports older messages once, then normal live
+                    forwarding continues separately.
+                </MudAlert>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="7">
+        <MudTable Items="mappings" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh>Source</MudTh>
+                <MudTh>Target</MudTh>
+                <MudTh>Filter</MudTh>
+                <MudTh>Rewrite</MudTh>
+                <MudTh>Mode</MudTh>
+                <MudTh>Live</MudTh>
+                <MudTh>Enabled</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.SourceChannelTitle</MudTd>
+                <MudTd>@context.TargetChannelTitle</MudTd>
+                <MudTd>
+                    <MudChip T="string" Color="@(context.HasFilter ? Color.Success : Color.Default)"
+                             Variant="Variant.Outlined">@(context.HasFilter ? "Configured" : "No")</MudChip>
+                </MudTd>
+                <MudTd>
+                    <MudChip T="string" Color="@(context.HasRewrite ? Color.Success : Color.Default)"
+                             Variant="Variant.Outlined">@(context.HasRewrite ? "Configured" : "No")</MudChip>
+                </MudTd>
+                <MudTd>@context.ForwardingMode</MudTd>
+                <MudTd>@context.LiveForwardingEnabled</MudTd>
+                <MudTd>@context.IsEnabled</MudTd>
+                <MudTd>
+                    <MudStack Row="true" Spacing="1">
+                        <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="@(() => LoadMapping(context))">
+                            Edit
+                        </MudButton>
+                        <MudButton Variant="Variant.Text" OnClick="@(() => OpenFilterDialogAsync(context))">Filter
+                        </MudButton>
+                        <MudButton Variant="Variant.Text" OnClick="@(() => OpenRewriteDialogAsync(context))">Rewrite
+                        </MudButton>
+                        <MudButton Variant="Variant.Text" Color="Color.Error"
+                                   OnClick="@(() => DeleteMappingAsync(context.Id))">Delete
+                        </MudButton>
+                    </MudStack>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudItem>
+</MudGrid>
+
+@code {
+
+    private IReadOnlyList<MappingSummary> mappings = [];
+
+    private IReadOnlyList<ChannelSummary> channels = [];
+
+    private Guid? editingMappingId;
+
+    private Guid? sourceChannelId;
+
+    private Guid? targetChannelId;
+
+    private Guid? backfillMappingId;
+
+    private ForwardingMode forwardingMode = ForwardingMode.CopyWithRewriting;
+
+    private int backfillTake = 100;
+
+    private bool isEnabled = true;
+
+    private bool liveForwardingEnabled = true;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync()
+    {
+        mappings = await MappingService.GetMappingsAsync();
+        channels = await ChannelService.GetChannelsAsync();
+    }
+
+    private void LoadMapping(MappingSummary mapping)
+    {
+        editingMappingId = mapping.Id;
+        sourceChannelId = mapping.SourceChannelId;
+        targetChannelId = mapping.TargetChannelId;
+        forwardingMode = mapping.ForwardingMode;
+        isEnabled = mapping.IsEnabled;
+        liveForwardingEnabled = mapping.LiveForwardingEnabled;
+    }
+
+    private void ResetEditor()
+    {
+        editingMappingId = null;
+        sourceChannelId = null;
+        targetChannelId = null;
+        forwardingMode = ForwardingMode.CopyWithRewriting;
+        isEnabled = true;
+        liveForwardingEnabled = true;
+    }
+
+    private async Task SaveMappingAsync()
+    {
+        try
+        {
+            if (!sourceChannelId.HasValue || !targetChannelId.HasValue)
+            {
+                Snackbar.Add("Select both a source and a target channel.", Severity.Warning);
+                return;
+            }
+
+            await MappingService.UpsertMappingAsync(
+                new MappingUpsertRequest(
+                    editingMappingId,
+                    sourceChannelId.Value,
+                    targetChannelId.Value,
+                    isEnabled,
+                    MappingDefaultPolicy.Allow,
+                    forwardingMode,
+                    null,
+                    null,
+                    liveForwardingEnabled,
+                    0));
+
+            await ReloadAsync();
+            ResetEditor();
+            Snackbar.Add("Mapping saved.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task OpenSelectedFilterDialogAsync()
+    {
+        MappingSummary? mapping = editingMappingId.HasValue ? mappings.FirstOrDefault(x => x.Id == editingMappingId.Value) : null;
+        if (mapping is null)
+        {
+            Snackbar.Add("Save the mapping first, then edit its filter.", Severity.Info);
+            return;
+        }
+
+        await OpenFilterDialogAsync(mapping);
+    }
+
+    private async Task OpenSelectedRewriteDialogAsync()
+    {
+        MappingSummary? mapping = editingMappingId.HasValue ? mappings.FirstOrDefault(x => x.Id == editingMappingId.Value) : null;
+        if (mapping is null)
+        {
+            Snackbar.Add("Save the mapping first, then edit its rewrite.", Severity.Info);
+            return;
+        }
+
+        await OpenRewriteDialogAsync(mapping);
+    }
+
+    private async Task OpenFilterDialogAsync(MappingSummary mapping)
+    {
+        DialogOptions options = new() { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        DialogParameters<MappingFilterDialog> parameters = new()
+        {
+            { x => x.MappingId, mapping.Id },
+            { x => x.MappingLabel, $"{mapping.SourceChannelTitle} -> {mapping.TargetChannelTitle}" }
+        };
+
+        IDialogReference dialog = await DialogService.ShowAsync<MappingFilterDialog>("Mapping Filter", parameters, options);
+        DialogResult? result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await ReloadAsync();
+            if (editingMappingId == mapping.Id)
+            {
+                LoadMapping(mappings.First(x => x.Id == mapping.Id));
+            }
+        }
+    }
+
+    private async Task OpenRewriteDialogAsync(MappingSummary mapping)
+    {
+        DialogOptions options = new() { CloseButton = true, MaxWidth = MaxWidth.Large, FullWidth = true };
+        DialogParameters<MappingRewriteDialog> parameters = new()
+        {
+            { x => x.MappingId, mapping.Id },
+            { x => x.MappingLabel, $"{mapping.SourceChannelTitle} -> {mapping.TargetChannelTitle}" }
+        };
+
+        IDialogReference dialog = await DialogService.ShowAsync<MappingRewriteDialog>("Mapping Rewrite", parameters, options);
+        DialogResult? result = await dialog.Result;
+        if (result is not null && !result.Canceled)
+        {
+            await ReloadAsync();
+            if (editingMappingId == mapping.Id)
+            {
+                LoadMapping(mappings.First(x => x.Id == mapping.Id));
+            }
+        }
+    }
+
+    private async Task RunBackfillAsync()
+    {
+        try
+        {
+            if (!backfillMappingId.HasValue)
+            {
+                Snackbar.Add("Select a mapping to backfill.", Severity.Warning);
+                return;
+            }
+
+            if (backfillTake <= 0)
+            {
+                Snackbar.Add("Backfill count must be greater than zero.", Severity.Warning);
+                return;
+            }
+
+            await MappingService.RunBackfillAsync(backfillMappingId.Value, backfillTake);
+            Snackbar.Add("Backfill queued. The worker will import messages, then filtering and forwarding will pick them up automatically.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task DeleteMappingAsync(Guid mappingId)
+    {
+        try
+        {
+            await MappingService.DeleteMappingAsync(mappingId);
+            await ReloadAsync();
+            if (editingMappingId == mappingId)
+            {
+                ResetEditor();
+            }
+
+            if (backfillMappingId == mappingId)
+            {
+                backfillMappingId = null;
+            }
+
+            Snackbar.Add("Mapping deleted.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+}
+

@@ -1,0 +1,9 @@
+@page "/settings"
+
+<PageHeader Title="Settings" Subtitle="Operational notes for this private deployment."/>
+
+<MudAlert Severity="Severity.Info">
+    Secrets are stored encrypted in PostgreSQL using ASP.NET Core Data Protection. In Docker Compose, keep PostgreSQL
+    volumes persistent so the data protection key ring and encrypted secrets remain usable across restarts.
+</MudAlert>
+

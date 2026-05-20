@@ -1,0 +1,176 @@
+@page "/channels"
+@inject IChannelManagementService ChannelService
+@inject ISnackbar Snackbar
+
+<PageHeader Title="Channels"
+            Subtitle="Discover channels, mark sources, mark existing admin channels as targets, or create new target channels."/>
+
+<MudStack Row="true" Class="mb-4">
+    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@DiscoverAsync">Discover Now</MudButton>
+</MudStack>
+
+<MudGrid>
+    <MudItem xs="12" md="7">
+        <MudTable Items="channels" Dense="true" Hover="true">
+            <HeaderContent>
+                <MudTh>Title</MudTh>
+                <MudTh>Username</MudTh>
+                <MudTh>Type</MudTh>
+                <MudTh>Source</MudTh>
+                <MudTh>Target</MudTh>
+                <MudTh>Permissions</MudTh>
+                <MudTh></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd>@context.Title</MudTd>
+                <MudTd>@context.Username</MudTd>
+                <MudTd>@context.ChannelType</MudTd>
+                <MudTd>@context.IsSource</MudTd>
+                <MudTd>@context.IsTarget</MudTd>
+                <MudTd>Post: @context.CanPost / Admin: @context.CanAdmin</MudTd>
+                <MudTd>
+                    <MudStack Row="true" Spacing="1">
+                        <MudButton Size="Size.Small" OnClick="@(() => ToggleSourceAsync(context))">Toggle Source
+                        </MudButton>
+                        <MudButton Size="Size.Small" Color="Color.Secondary"
+                                   OnClick="@(() => ToggleTargetAsync(context))">Toggle Target
+                        </MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Outlined"
+                                   OnClick="@(() => SelectSourceForTarget(context))">Create Target
+                        </MudButton>
+                        <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error"
+                                   OnClick="@(() => DeleteChannelAsync(context.Id))">Delete
+                        </MudButton>
+                    </MudStack>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    </MudItem>
+    <MudItem xs="12" md="5">
+        <MudPaper Class="pa-4">
+            <MudText Typo="Typo.h6">Create Target Channel</MudText>
+            <MudText Typo="Typo.body2" Class="mud-secondary-text">Select a source channel, then create a Telegram target
+                channel using the same connected session.
+            </MudText>
+            <MudSelect T="Guid?" @bind-Value="selectedSourceId" Label="Source Channel" Class="mt-2">
+                @foreach (var source in channels.Where(x => x.IsSource))
+                {
+                    <MudSelectItem T="Guid?" Value="@source.Id">@source.Title</MudSelectItem>
+                }
+            </MudSelect>
+            <MudTextField @bind-Value="targetTitle" Label="Target Title"/>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="mt-3" OnClick="@CreateTargetAsync">Create
+                Target
+            </MudButton>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+
+    private IReadOnlyList<ChannelSummary> channels = [];
+
+    private Guid? selectedSourceId;
+
+    private string targetTitle = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await ReloadAsync();
+
+    private async Task ReloadAsync() => channels = await ChannelService.GetChannelsAsync();
+
+    private async Task DiscoverAsync()
+    {
+        try
+        {
+            await ChannelService.DiscoverChannelsAsync();
+            await ReloadAsync();
+            Snackbar.Add("Channel discovery queued. Refresh this page after the worker processes it.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task ToggleSourceAsync(ChannelSummary channel)
+    {
+        try
+        {
+            await ChannelService.SetSourceStateAsync(channel.Id, !channel.IsSource);
+            await ReloadAsync();
+            Snackbar.Add(channel.IsSource ? "Source disabled." : "Source enabled.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task ToggleTargetAsync(ChannelSummary channel)
+    {
+        try
+        {
+            await ChannelService.SetTargetStateAsync(channel.Id, !channel.IsTarget);
+            await ReloadAsync();
+            Snackbar.Add(channel.IsTarget ? "Target flag removed." : "Channel marked as target.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private void SelectSourceForTarget(ChannelSummary channel)
+    {
+        selectedSourceId = channel.Id;
+        targetTitle = $"Copy of {channel.Title}";
+    }
+
+    private async Task CreateTargetAsync()
+    {
+        try
+        {
+            if (!selectedSourceId.HasValue)
+            {
+                Snackbar.Add("Select a source channel first.", Severity.Warning);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(targetTitle))
+            {
+                Snackbar.Add("Enter a target title.", Severity.Warning);
+                return;
+            }
+
+            await ChannelService.CreateTargetForSourceAsync(selectedSourceId.Value, targetTitle.Trim());
+            await ReloadAsync();
+            Snackbar.Add("Target creation queued. Refresh this page after the worker processes it.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+    private async Task DeleteChannelAsync(Guid channelId)
+    {
+        try
+        {
+            await ChannelService.DeleteChannelAsync(channelId);
+            await ReloadAsync();
+            if (selectedSourceId == channelId)
+            {
+                selectedSourceId = null;
+                targetTitle = string.Empty;
+            }
+
+            Snackbar.Add("Channel deleted.", Severity.Success);
+        }
+        catch (Exception exception)
+        {
+            Snackbar.Add(exception.Message, Severity.Error);
+        }
+    }
+
+}
+

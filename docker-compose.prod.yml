@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${COPYCAT_DB_NAME:-copycat}
+      POSTGRES_USER: ${COPYCAT_DB_USER:-copycat}
+      POSTGRES_PASSWORD: ${COPYCAT_DB_PASSWORD:?set COPYCAT_DB_PASSWORD}
+    volumes:
+      - copycat-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  web:
+    build:
+      context: .
+      dockerfile: src/CopyCat.Web/Dockerfile
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Security__ApplicationName: ${COPYCAT_APP_NAME:-CopyCat}
+      ConnectionStrings__CopyCat: Host=postgres;Port=5432;Database=${COPYCAT_DB_NAME:-copycat};Username=${COPYCAT_DB_USER:-copycat};Password=${COPYCAT_DB_PASSWORD:?set COPYCAT_DB_PASSWORD}
+    ports:
+      - 127.0.0.1:${COPYCAT_WEB_PORT:-8080}:8080
+
+  worker:
+    build:
+      context: .
+      dockerfile: src/CopyCat.Worker/Dockerfile
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Security__ApplicationName: ${COPYCAT_APP_NAME:-CopyCat}
+      ConnectionStrings__CopyCat: Host=postgres;Port=5432;Database=${COPYCAT_DB_NAME:-copycat};Username=${COPYCAT_DB_USER:-copycat};Password=${COPYCAT_DB_PASSWORD:?set COPYCAT_DB_PASSWORD}
+
+volumes:
+  copycat-postgres:
